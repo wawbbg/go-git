@@ -22,11 +22,11 @@ var (
 
 // CommitData holds parsed data for a single commit node.
 type CommitData struct {
-	Hash           plumbing.Hash
-	ParentHashes   []plumbing.Hash
-	TreeHash       plumbing.Hash
-	Generation     uint32
-	When           time.Time
+	Hash         plumbing.Hash
+	ParentHashes []plumbing.Hash
+	TreeHash     plumbing.Hash
+	Generation   uint32
+	When         time.Time
 }
 
 // MemoryIndex holds commit graph data in memory.
@@ -42,6 +42,7 @@ func NewMemoryIndex() *MemoryIndex {
 }
 
 // Add inserts a CommitData entry into the index.
+// Note: if a commit with the same hash already exists, it will be overwritten.
 func (m *MemoryIndex) Add(c *CommitData) {
 	m.commits[c.Hash] = c
 }
@@ -62,6 +63,11 @@ func (m *MemoryIndex) Hashes() []plumbing.Hash {
 		hashes = append(hashes, h)
 	}
 	return hashes
+}
+
+// Len returns the number of commits stored in the index.
+func (m *MemoryIndex) Len() int {
+	return len(m.commits)
 }
 
 // readUint32 is a helper to read a big-endian uint32 from a reader.
