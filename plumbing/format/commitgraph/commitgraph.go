@@ -1,57 +1,74 @@
 package commitgraph
 
 import (
+	"encoding/binary"
+	"errors"
 	"io"
-	"math"
 	"time"
 
-	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v5/plumbing"
 )
 
-// CommitData is a reduced representation of Commit as presented in the commit graph
-// file. It is merely useful as an optimization for walking the commit graphs.
+const (
+	Signature  = "CGPH"
+	Version    = 1
+	HashLength = 20
+)
+
+var (
+	ErrMalformedCommitGraph = errors.New("malformed commit-graph file")
+	ErrUnsupportedVersion   = errors.New("unsupported commit-graph version")
+)
+
+// CommitData holds parsed data for a single commit node.
 type CommitData struct {
-	// TreeHash is the hash of the root tree of the commit.
-	TreeHash plumbing.Hash
-	// ParentIndexes are the indexes of the parent commits of the commit.
-	ParentIndexes []uint32
-	// ParentHashes are the hashes of the parent commits of the commit.
-	ParentHashes []plumbing.Hash
-	// Generation number is the pre-computed generation in the commit graph
-	// or zero if not available.
-	Generation uint64
-	// GenerationV2 stores the corrected commit date for the commits
-	// It combines the contents of the GDA2 and GDO2 sections of the commit-graph
-	// with the commit time portion of the CDAT section.
-	GenerationV2 uint64
-	// When is the timestamp of the commit.
-	When time.Time
+	Hash           plumbing.Hash
+	ParentHashes   []plumbing.Hash
+	TreeHash       plumbing.Hash
+	Generation     uint32
+	When           time.Time
 }
 
-// GenerationV2Data returns the corrected commit date for the commits
-func (c *CommitData) GenerationV2Data() uint64 {
-	if c.GenerationV2 == 0 || c.GenerationV2 == math.MaxUint64 {
-		return 0
+// MemoryIndex holds commit graph data in memory.
+type MemoryIndex struct {
+	commits map[plumbing.Hash]*CommitData
+}
+
+// NewMemoryIndex creates an empty in-memory commit graph index.
+func NewMemoryIndex() *MemoryIndex {
+	return &MemoryIndex{
+		commits: make(map[plumbing.Hash]*CommitData),
 	}
-	return c.GenerationV2 - uint64(c.When.Unix())
 }
 
-// Index represents a representation of commit graph that allows indexed
-// access to the nodes using commit object hash
-type Index interface {
-	// GetIndexByHash gets the index in the commit graph from commit hash, if available
-	GetIndexByHash(h plumbing.Hash) (uint32, error)
-	// GetHashByIndex gets the hash given an index in the commit graph
-	GetHashByIndex(i uint32) (plumbing.Hash, error)
-	// GetNodeByIndex gets the commit node from the commit graph using index
-	// obtained from child node, if available
-	GetCommitDataByIndex(i uint32) (*CommitData, error)
-	// Hashes returns all the hashes that are available in the index
-	Hashes() []plumbing.Hash
-	// HasGenerationV2 returns true if the commit graph has the corrected commit date data
-	HasGenerationV2() bool
-	// MaximumNumberOfHashes returns the maximum number of hashes within the index
-	MaximumNumberOfHashes() uint32
+// Add inserts a CommitData entry into the index.
+func (m *MemoryIndex) Add(c *CommitData) {
+	m.commits[c.Hash] = c
+}
 
-	io.Closer
+// GetCommitDataByHash returns commit data for the given hash.
+func (m *MemoryIndex) GetCommitDataByHash(h plumbing.Hash) (*CommitData, error) {
+	c, ok := m.commits[h]
+	if !ok {
+		return nil, plumbing.ErrObjectNotFound
+	}
+	return c, nil
+}
+
+// Hashes returns all hashes stored in the index.
+func (m *MemoryIndex) Hashes() []plumbing.Hash {
+	hashes := make([]plumbing.Hash, 0, len(m.commits))
+	for h := range m.commits {
+		hashes = append(hashes, h)
+	}
+	return hashes
+}
+
+// readUint32 is a helper to read a big-endian uint32 from a reader.
+func readUint32(r io.Reader) (uint32, error) {
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint32(buf), nil
 }
