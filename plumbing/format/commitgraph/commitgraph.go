@@ -70,6 +70,13 @@ func (m *MemoryIndex) Len() int {
 	return len(m.commits)
 }
 
+// Has returns true if the given hash exists in the index.
+// Useful for quickly checking membership without fetching the full CommitData.
+func (m *MemoryIndex) Has(h plumbing.Hash) bool {
+	_, ok := m.commits[h]
+	return ok
+}
+
 // readUint32 is a helper to read a big-endian uint32 from a reader.
 func readUint32(r io.Reader) (uint32, error) {
 	buf := make([]byte, 4)
