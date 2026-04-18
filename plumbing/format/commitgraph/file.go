@@ -88,6 +88,7 @@ func (f *fileIndex) readChunkTable(numChunks int) error {
 		return fmt.Errorf("commit-graph missing required chunks")
 	}
 	// Total count is the last entry of the fanout table (index 255).
+	// The fanout table has 256 entries, each 4 bytes wide.
 	countBuf := make([]byte, 4)
 	if _, err := f.reader.ReadAt(countBuf, f.oidFanoutOff+255*4); err != nil {
 		return fmt.Errorf("reading fanout count: %w", err)
@@ -96,6 +97,8 @@ func (f *fileIndex) readChunkTable(numChunks int) error {
 	return nil
 }
 
+// GetIndexByHash returns the position of the given hash in the OID lookup table
+// using binary search. Returns an error if the hash is not found.
 func (f *fileIndex) GetIndexByHash(h plumbing.Hash) (uint32, error) {
 	var lo, hi uint32 = 0, f.count
 	for lo < hi {
@@ -113,35 +116,5 @@ func (f *fileIndex) GetIndexByHash(h plumbing.Hash) (uint32, error) {
 			hi = mid
 		}
 	}
-	return 0, plumbing.ErrObjectNotFound
-}
-
-func (f *fileIndex) GetNodeByIndex(idx uint32) (*Node, error) {
-	if idx >= f.count {
-		return nil, fmt.Errorf("index out of range")
-	}
-	const commitDataEntrySize = 20 + 20 + 8 + 4 + 4
-	entry := make([]byte, commitDataEntrySize)
-	if _, err := f.reader.ReadAt(entry, f.commitDataOff+int64(idx)*commitDataEntrySize); err != nil {
-		return nil, err
-	}
-	node := &Node{}
-	copy(node.TreeHash[:], entry[:20])
-	p1 := binary.BigEndian.Uint32(entry[40:44])
-	p2 := binary.BigEndian.Uint32(entry[44:48])
-	if p1 != 0x70000000 {
-		node.ParentIndexes = append(node.ParentIndexes, p1&0x7fffffff)
-	}
-	if p2 != 0x70000000 {
-		node.ParentIndexes = append(node.ParentIndexes, p2&0x7fffffff)
-	}
-	return node, nil
-}
-
-func (f *fileIndex) Hashes() []plumbing.Hash {
-	hashes := make([]plumbing.Hash, f.count)
-	for i := uint32(0); i < f.count; i++ {
-		f.reader.ReadAt(hashes[i][:], f.oidLookupOff+int64(i)*20) //nolint:errcheck
-	}
-	return hashes
+	return 0, fmt.Errorf("hash not found in commit-graph: %s", h)
 }
