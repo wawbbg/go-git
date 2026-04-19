@@ -3,6 +3,7 @@ package commitgraph
 import (
 	"crypto/sha1"
 	"encoding/binary"
+	"hash"
 	"io"
 
 	"github.com/go-git/go-git/v5/plumbing"
@@ -78,7 +79,7 @@ func (e *Encoder) Encode(idx *MemoryIndex) error {
 			return err
 		}
 	}
-	// Terminator
+	// Terminator entry: chunk ID 0 with offset pointing past the last chunk
 	if err := e.writeUint32(chunkTableOfContentsTerminator); err != nil {
 		return err
 	}
@@ -86,7 +87,7 @@ func (e *Encoder) Encode(idx *MemoryIndex) error {
 		return err
 	}
 
-	// OID Fanout chunk
+	// OID Fanout chunk: cumulative count of hashes with first byte <= i
 	fanout := [256]uint32{}
 	for _, h := range hashes {
 		fanout[h[0]]++
@@ -120,7 +121,8 @@ func (e *Encoder) Encode(idx *MemoryIndex) error {
 		if _, err := e.w.Write(commit.TreeHash[:]); err != nil {
 			return err
 		}
-		p1 := uint32(0x70000000) // no parent
+		// Use 0x70000000 as the sentinel value for "no parent" per the commit-graph spec
+		p1 := uint32(0x70000000)
 		if len(commit.ParentIndexes) > 0 {
 			p1 = uint32(commit.ParentIndexes[0])
 		}
@@ -128,41 +130,3 @@ func (e *Encoder) Encode(idx *MemoryIndex) error {
 			return err
 		}
 		p2 := uint32(0x70000000)
-		if len(commit.ParentIndexes) > 1 {
-			p2 = uint32(commit.ParentIndexes[1])
-		}
-		if err := e.writeUint32(p2); err != nil {
-			return err
-		}
-		generation := uint64(commit.Generation)<<34 | uint64(commit.When.Unix())
-		if err := e.writeUint64(generation); err != nil {
-			return err
-		}
-	}
-
-	// Write checksum
-	_, err := e.w.(io.Writer).Write(e.hash.Sum(nil))
-	return err
-}
-
-func (e *Encoder) writeByte(b byte) error {
-	_, err := e.w.Write([]byte{b})
-	return err
-}
-
-func (e *Encoder) writeUint32(v uint32) error {
-	buf := make([]byte, 4)
-	binary.BigEndian.PutUint32(buf, v)
-	_, err := e.w.Write(buf)
-	return err
-}
-
-func (e *Encoder) writeUint64(v uint64) error {
-	buf := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf, v)
-	_, err := e.w.Write(buf)
-	return err
-}
-
-// Ensure plumbing is imported (used for type references in other files)
-var _ = plumbing.ZeroHash
