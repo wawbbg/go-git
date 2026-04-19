@@ -89,6 +89,7 @@ func (f *fileIndex) readChunkTable(numChunks int) error {
 	}
 	// Total count is the last entry of the fanout table (index 255).
 	// The fanout table has 256 entries, each 4 bytes wide.
+	// Note: fanout[255] gives the total number of commits in the graph.
 	countBuf := make([]byte, 4)
 	if _, err := f.reader.ReadAt(countBuf, f.oidFanoutOff+255*4); err != nil {
 		return fmt.Errorf("reading fanout count: %w", err)
@@ -100,14 +101,33 @@ func (f *fileIndex) readChunkTable(numChunks int) error {
 // GetIndexByHash returns the position of the given hash in the OID lookup table
 // using binary search. Returns an error if the hash is not found.
 func (f *fileIndex) GetIndexByHash(h plumbing.Hash) (uint32, error) {
+	// Use the fanout table to narrow the search range to hashes sharing the
+	// same first byte, reducing the binary search space significantly.
 	var lo, hi uint32 = 0, f.count
+
+	// Narrow range using fanout table.
+	if h[0] > 0 {
+		fanoutBuf := make([]byte, 4)
+		if _, err := f.reader.ReadAt(fanoutBuf, f.oidFanoutOff+int64(h[0]-1)*4); err != nil {
+			return 0, fmt.Errorf("reading fanout entry: %w", err)
+		}
+		lo = binary.BigEndian.Uint32(fanoutBuf)
+	}
+	{
+		fanoutBuf := make([]byte, 4)
+		if _, err := f.reader.ReadAt(fanoutBuf, f.oidFanoutOff+int64(h[0])*4); err != nil {
+			return 0, fmt.Errorf("reading fanout entry: %w", err)
+		}
+		hi = binary.BigEndian.Uint32(fanoutBuf)
+	}
+
 	for lo < hi {
 		mid := (lo + hi) / 2
-		var hash plumbing.Hash
-		if _, err := f.reader.ReadAt(hash[:], f.oidLookupOff+int64(mid)*20); err != nil {
-			return 0, err
+		var entry plumbing.Hash
+		if _, err := f.reader.ReadAt(entry[:], f.oidLookupOff+int64(mid)*20); err != nil {
+			return 0, fmt.Errorf("reading OID entry: %w", err)
 		}
-		cmp := bytes.Compare(hash[:], h[:])
+		cmp := bytes.Compare(entry[:], h[:])
 		if cmp == 0 {
 			return mid, nil
 		} else if cmp < 0 {
@@ -116,5 +136,5 @@ func (f *fileIndex) GetIndexByHash(h plumbing.Hash) (uint32, error) {
 			hi = mid
 		}
 	}
-	return 0, fmt.Errorf("hash not found in commit-graph: %s", h)
+	return 0, plumbing.ErrObjectNotFound
 }
