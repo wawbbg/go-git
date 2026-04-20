@@ -19,7 +19,7 @@ func TestMemoryIndex_AddAndGet(t *testing.T) {
 		ParentHashes: []plumbing.Hash{parent},
 		TreeHash:     tree,
 		Generation:   1,
-		When:         time.Unix(1609459200, 0),
+		When:         time.Unix(1609459200, 0), // 2021-01-01 00:00:00 UTC
 	}
 
 	idx.Add(cd)
@@ -36,6 +36,10 @@ func TestMemoryIndex_AddAndGet(t *testing.T) {
 	}
 	if got.Generation != 1 {
 		t.Errorf("expected generation 1, got %d", got.Generation)
+	}
+	// also verify the timestamp round-trips correctly
+	if !got.When.Equal(time.Unix(1609459200, 0)) {
+		t.Errorf("expected When to be 2021-01-01, got %v", got.When)
 	}
 }
 
